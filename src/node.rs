@@ -26,11 +26,18 @@ impl Node{
             .expect("Couldn't bind")
         };
 
+        node.listener();
+
+        node // Return the node struct
+    }
+
+    fn listener(&self){
         // Clone the socket so that it can be moved into the other thread
-        let new_socket = node.socket.try_clone().expect("Unable to clone socket");
+        let new_socket = self.socket.try_clone().expect("Unable to clone socket");
+        let node_id = self.id;
 
         // Create a new thread responsible for waiting for incoming UDP messages
-        thread::Builder::new().name("NodeListener".to_string()).spawn(move || {
+        thread::Builder::new().name(format!("NodeListener {}", node_id)).spawn(move || {
             loop {
                 // This buffer stores the incoming datagram
                 let mut buffer = [0; 1024];
@@ -38,22 +45,26 @@ impl Node{
                 // This makes sure that something only happens if the message is correctly received
                 match new_socket.recv_from(&mut buffer) {
                     Ok((num_bytes, src_addr)) => {
+                        // Use the number of bytes sent to take the message from the buffer
                         let send_buffer = &mut buffer[..num_bytes];
 
-                        println!("Received: {} from {}", str::from_utf8(send_buffer).unwrap(),
+                        // Print out message
+                        println!("{} received: {} from {}", node_id, str::from_utf8(send_buffer).unwrap(),
                             src_addr.to_string());
+
+                        // If message isn't ACK
+                        if str::from_utf8(send_buffer).unwrap() != "ACK"{
+                            // Respond with ACK
+                            new_socket.send_to(String::from("ACK").as_bytes(), src_addr.to_string()).expect(&*format!("{}", node_id));
+                        }
                     }
                     _ => {}
                 }
             }
         }).expect("Thread failed");
-
-        node // Return the node struct
     }
 
     pub fn send_msg(&self, msg:String, dest:String){
-        // Connect to the destination address and send the message
-        self.socket.connect(dest).expect("Couldn't connect");
-        self.socket.send(msg.as_bytes()).expect("Unable to send");
+        self.socket.send_to(msg.as_bytes(), dest).expect("Couldn't send message");
     }
 }
