@@ -11,11 +11,14 @@ pub struct Node {
     pub id: usize,
     pub address: String,
     pub port: usize,
-    socket: UdpSocket
+    socket: UdpSocket,
+    successor:String,
+    predecessor:String
+
 }
 
 impl Node{
-    pub fn new(id: usize, address: String, port:usize) -> Node {
+    pub fn new(id: usize, address: String, port:usize) {
         // Create the socket address for this node
         let bind_address = format!("{}:{}", address, port.to_string());
 
@@ -23,14 +26,22 @@ impl Node{
         let node = Node{
             id, address, port,
             socket: UdpSocket::bind(bind_address)
-            .expect("Couldn't bind")
+            .expect("Couldn't bind"),
+            successor: String::new(),
+            predecessor: String::new(),
         };
 
+        node.main_thread();
         node.listener();
 
-        node // Return the node struct
     }
 
+    // The main thread for each node
+    fn main_thread(&self){
+        println!("{:?}", self);
+    }
+
+    // New thread for receiving UDP messages
     fn listener(&self){
         // Clone the socket so that it can be moved into the other thread
         let new_socket = self.socket.try_clone().expect("Unable to clone socket");
@@ -53,10 +64,10 @@ impl Node{
                             src_addr.to_string());
 
                         // If message isn't ACK
-                        if str::from_utf8(send_buffer).unwrap() != "ACK"{
+                        /*if str::from_utf8(send_buffer).unwrap() != "ACK"{
                             // Respond with ACK
                             new_socket.send_to(String::from("ACK").as_bytes(), src_addr.to_string()).expect(&*format!("{}", node_id));
-                        }
+                        }*/
                     }
                     _ => {}
                 }
