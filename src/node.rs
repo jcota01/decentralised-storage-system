@@ -1,6 +1,9 @@
+use std::collections::VecDeque;
 use std::net::UdpSocket;
 use std::thread;
 use std::str;
+use std::sync::{Arc, Mutex};
+use crate::request::Request;
 
 /*
 This struct is used to represent each node on the system. Each node acts completely independently
@@ -11,7 +14,8 @@ pub struct Node {
     pub id: usize,
     pub address: String,
     pub port: usize,
-    socket: UdpSocket
+    socket: UdpSocket,
+    queue: Arc<Mutex<VecDeque<Box<Request>>>>
 }
 
 impl Node{
@@ -19,11 +23,15 @@ impl Node{
         // Create the socket address for this node
         let bind_address = format!("{}:{}", address, port.to_string());
 
+        let mut queue:VecDeque<Box<Request>> = VecDeque::with_capacity(20);
+        let queue = Mutex::new(queue);
+        let queue = Arc::new(queue);
+
         // Create the node struct with the given parameters and a new UDPsocket
         let node = Node{
             id, address, port,
-            socket: UdpSocket::bind(bind_address)
-            .expect("Couldn't bind")
+            socket: UdpSocket::bind(bind_address).expect("Couldn't bind"),
+            queue
         };
 
         node.listener();
@@ -34,7 +42,8 @@ impl Node{
     fn listener(&self){
         // Clone the socket so that it can be moved into the other thread
         let new_socket = self.socket.try_clone().expect("Unable to clone socket");
-        let node_id = self.id;
+        let node_id = self.id.clone();
+        let listener_queue = self.queue.clone();
 
         // Create a new thread responsible for waiting for incoming UDP messages
         thread::Builder::new().name(format!("NodeListener {}", node_id)).spawn(move || {
@@ -48,15 +57,22 @@ impl Node{
                         // Use the number of bytes sent to take the message from the buffer
                         let send_buffer = &mut buffer[..num_bytes];
 
+                        let msg = str::from_utf8(send_buffer).unwrap();
+                        let msg = msg.to_string();
+
                         // Print out message
                         println!("{} received: {} from {}", node_id, str::from_utf8(send_buffer).unwrap(),
                             src_addr.to_string());
 
-                        // If message isn't ACK
-                        if str::from_utf8(send_buffer).unwrap() != "ACK"{
-                            // Respond with ACK
-                            new_socket.send_to(String::from("ACK").as_bytes(), src_addr.to_string()).expect(&*format!("{}", node_id));
-                        }
+                        let request:Request = Request{
+                            msg
+                        };
+
+                        if let Ok(mut x) = listener_queue.lock(){
+                            x.push_back(
+                                Box::new(request)
+                            );
+                        };
                     }
                     _ => {}
                 }
