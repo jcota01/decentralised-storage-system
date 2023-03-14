@@ -3,6 +3,7 @@ use std::net::UdpSocket;
 use std::thread;
 use std::str;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use crate::request::Request;
 
 /*
@@ -26,7 +27,7 @@ impl Node{
         // Create the socket address for this node
         let bind_address = format!("{}:{}", address, port.to_string());
 
-        let mut queue:VecDeque<Box<Request>> = VecDeque::with_capacity(20);
+        let queue:VecDeque<Box<Request>> = VecDeque::with_capacity(20);
         let queue = Mutex::new(queue);
         let queue = Arc::new(queue);
 
@@ -39,24 +40,37 @@ impl Node{
             queue
         };
 
-        node.main_thread();
         node.listener();
-
+        node.main_thread();
     }
 
     // The main thread for each node
     fn main_thread(&self){
-        println!("{:?}", self);
+        loop {
+            let mut request:Option<Box<Request>> = None;
+            if let Ok(mut x) = self.queue.lock(){
+                if !x.is_empty(){
+                    request = x.pop_front();
+                }
+            };
+
+            match request {
+                None => {}
+                Some(x) => {println!("{:?}", x)}
+            };
+
+            thread::sleep(Duration::from_millis(500));
+        }
     }
 
     // New thread for receiving UDP messages
     fn listener(&self){
-        // Clone the socket so that it can be moved into the other thread
+        // Clone variables for the new thread
         let new_socket = self.socket.try_clone().expect("Unable to clone socket");
         let node_id = self.id.clone();
         let listener_queue = self.queue.clone();
 
-        // Create a new thread responsible for waiting for incoming UDP messages
+
         thread::Builder::new().name(format!("NodeListener {}", node_id)).spawn(move || {
             loop {
                 // This buffer stores the incoming datagram
@@ -68,21 +82,12 @@ impl Node{
                         // Use the number of bytes sent to take the message from the buffer
                         let send_buffer = &mut buffer[..num_bytes];
 
-                        let msg = str::from_utf8(send_buffer).unwrap();
-                        let msg = msg.to_string();
+                        let msg = str::from_utf8(send_buffer).unwrap().to_string();
+                        let request = Request{ msg };
 
-                        // Print out message
-                        println!("{} received: {} from {}", node_id, str::from_utf8(send_buffer).unwrap(),
-                            src_addr.to_string());
-
-                        let request:Request = Request{
-                            msg
-                        };
-
+                        // Access the queue to push the request
                         if let Ok(mut x) = listener_queue.lock(){
-                            x.push_back(
-                                Box::new(request)
-                            );
+                            x.push_back(Box::new(request));
                         };
                     }
                     _ => {}
